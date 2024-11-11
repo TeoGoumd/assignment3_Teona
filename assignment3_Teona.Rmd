@@ -1,0 +1,484 @@
+---
+title: "assignment 3"
+author: "Teona"
+date: "2024-11-10"
+output: html_document
+---
+
+
+```{r}
+install.packages("tidytext")
+install.packages("tidyverse")
+install.packages("pdftools")
+
+```
+# Part 1: Scrape a PDF and split into separate text files
+
+```{r}
+#install.packages("pdftools")
+library(tidyverse)
+library(pdftools)
+```
+
+## Convert PDF to text
+Using 10 articles downloaded from NexisUni 
+
+```{r}
+
+text <- pdf_text("/Users/teona/Desktop/text analysis/assignment3/moley_news.PDF")
+
+
+#pdf_text reads the text from a PDF file.
+writeLines(text, "/Users/teona/Desktop/text analysis/assignment3/moley_news.PDF")
+#writeLines writes this text to a text file
+
+```
+
+
+
+# Split text to separate articles on common identifier
+
+In this case, NexisUni makes life easy for us. At the end of each document, there are the words "End of Document". Convenient! We search for "End of Document" and then instruct R to split the file and dump it into a standalone text file.
+
+```{r}
+# Step 1: Read the entire text file into R
+#You will need to alter this for your computer
+#For Mac: In Finder, Cntl + click on the filename, NOW hold down Alt/Option, and an item to copy file path will appear as Copy "Filename" as Pathname 
+#https://stackoverflow.com/questions/52695546/how-to-copy-path-of-a-file-in-mac-os
+
+
+file_path <- "/Users/teona/Desktop/text analysis/assignment3/extracted/moley_news.txt"
+
+
+#file_path <- "assets/extracted_text/AIW.txt"
+text_data <- readLines(file_path)
+
+#I don't understand why this last part doesn't work
+
+
+# Step 2: Combine lines into one single string
+text_combined <- paste(text_data, collapse = "\n")
+
+# Step 3: Split the text by the "End of Document" phrase
+documents <- strsplit(text_combined, "End of Document")[[1]]
+
+
+
+# Step 4: Write each section to a new file
+output_dir <- "/Users/teona/Desktop/text analysis/assignment3/extracted"
+output_dir <- "assets/extracted_text"
+for (i in seq_along(documents)) {
+  output_file <- file.path(output_dir, paste0("moley_extracted", i, ".txt"))
+  writeLines(documents[[i]], output_file)
+}
+
+cat("Files created:", length(documents), "\n")
+
+
+
+```
+
+## Create an index from the first extracted page
+--We are just grabbing the index of the 10 listed items and creating a dataframe
+
+```{r}
+#I cannot open PDF document in here, cannot see the lines
+
+moley_index <- read_lines("/Users/teona/Desktop/text analysis/assignment3/extracted/moley_extracted1.txt")
+
+#moley_index <- read_lines("assignment3/extracted/moley_extracted1.txt")
+
+# Extract lines 16 to 91
+extracted_lines <- moley_index[16:91]
+
+
+# Print the extracted lines to the console
+cat(extracted_lines, sep = "\n")
+
+extracted_lines <- extracted_lines |> 
+  as.data.frame() 
+
+```
+## Build a final dataframe index
+
+```{r}
+# Step 1: Trim spaces and detect rows with titles and dates
+cleaned_data <- extracted_lines |>
+  mutate(
+    # Trim leading and trailing spaces before detection
+    trimmed_line = str_trim(extracted_lines),  
+
+    # Detect titles (start with a number and a period)
+    is_title = str_detect(trimmed_line, "^\\d+\\. "),  
+
+    # Detect dates (e.g., "Aug 14, 2024")
+    is_date = str_detect(trimmed_line, "\\b\\w{3} \\d{1,2}, \\d{4}\\b")
+  )
+
+
+# Step 2: Shift dates to align with corresponding titles
+aligned_data <- cleaned_data |>
+  mutate(
+    date = ifelse(lead(is_date, 1), lead(trimmed_line, 1), NA_character_)  # Shift date to title's row
+  ) |>
+  filter(is_title) |>
+  select(trimmed_line, date)  # Keep only the relevant columns
+
+# Step 3: Rename columns for clarity
+final_data <- aligned_data |>
+  rename(
+    title = trimmed_line,
+    date = date
+  )
+
+
+#Step 4: Date and Publication in separate columns, and formatted
+final_data <- separate(data = final_data, col = date, into = c("date2", "publication"), sep = "  ", extra = "merge", fill = "right")
+
+
+#Step 5: Format date, clean headline
+final_data <- final_data |> 
+  mutate(date = as.Date(date2,format = "%b %d, %Y")) |> 
+  mutate(title =str_remove(title, "^\\d+\\. ")) |> 
+  subset(select = -(date2)) |> 
+  mutate(index = row_number()) |> 
+  select(index, date, title, publication)
+
+
+#write_csv(final_data, "../assignment3/extracted.csv")
+
+```
+
+
+
+# Part 2: Compile Text into a Dataframe
+
+## Raw text compiler 
+```{r include=FALSE}
+
+#This creates an index with the file path to the stories. And then it compiles the stories into a dataframe
+#####################
+# Begin SM Code #####
+#####################
+
+###
+# List out text files that match pattern .txt, create DF
+###
+
+#file path: /Users/teona/Desktop/text analysis/assignment3/extracted
+
+files <- list.files("//Users/teona/Desktop/text analysis/assignment3/extracted", pattern="*.txt") %>% 
+#files <- list.files("assets/extracted_text", pattern="*.txt") %>% 
+  as.data.frame() |> 
+  rename(filename = 1) |> 
+  #create an index with the file name
+ mutate(index = str_extract(filename, "\\d+")) |> 
+  mutate(index = as.numeric(index))
+
+
+#Join the file list to the index
+
+#load final data if you haven't already
+#final_data <- read.csv("/Users/teona/Desktop/text analysis/assignment3/final_data.csv")
+
+final_index <- final_data |> 
+  inner_join(files, c("index")) |> 
+#you need the actual hard-coded path on this line below to the text
+  
+  
+  
+  # mutate(filepath = paste0("/Users/teona/Desktop/text analysis/assignment3/extracted", filename))
+  mutate(filepath = paste0("/Users/teona/Desktop/text analysis/assignment3/extracted", filename))
+
+
+#mutate(filepath = paste0("~/GitHub/CompText_Jour/Week_10_assignment/Week _10_extracted", filename))
+head(final_index)
+
+
+```
+
+
+
+## Text compiler
+```{r}
+
+#11.10 --> it isn't clear what is wrong from "#rsw comment" below
+
+
+names(articles_df) #rsw comment: Error: object 'articles_df' not found. This chunk didn't run because of this error
+names(final_index)
+
+
+glimpse(final_index)
+
+
+articles_df <- tibble()
+
+
+# Check if it worked
+glimpse(articles_df)
+
+
+
+
+###
+# Define function to loop through each text file 
+###
+
+create_article_text <- function(row_value) {
+  
+  #row_value is the single argument that is passed to the function
+  # Take each row of the dataframe
+  temp <- final_index %>%
+    slice(row_value)
+  
+  # Store the filename for  use in constructing articles dataframe
+  temp_filename <- temp$filename
+  
+  # Create a dataframe by reading in lines of a given textfile
+  # Add a filename column 
+  
+
+articles_df_temp <- read_lines(temp$filepath) %>%
+    as_tibble() %>%
+    mutate(
+      filename = temp_filename)
+  
+  
+  
+  # Bind results to master articles_df
+  # <<- returns to global environment
+  articles_df <<- articles_df %>%
+    bind_rows(articles_df_temp)
+}
+
+
+###
+# Create elements needed to run function
+###
+
+# Create empty tibble to store results
+articles_df <- tibble()
+#running once to test
+#create_article_text(2) 
+# Create an array of numbers to loop through, from 1 to the number of rows in our index dataframe 
+
+row_values <- 1:nrow(final_index)
+
+###
+# Execute function using lapply
+# This loops through each row of the dataframe and append results to master file
+###
+
+###
+# Clean up articles_df and join to index dataframe
+###
+
+moley_df <- articles_df %>%
+  select(filename, sentence=value) %>%
+  inner_join(final_index)
+
+
+#articles_df <- articles_df %>%
+  select(filename, sentence = trimmed_line, is_title, is_date) %>%
+  inner_join(final_index)
+
+  #gets rid of blank rows
+    filter(trimws(sentence) != "") 
+
+write.csv(articles_df, "../text analysis/assignment3/extracted")
+
+```
+
+
+```{r}
+
+install.packages("dplyr")
+
+```
+
+#folder path: ~/Desktop/text analysis/assignment3/moley_separated
+
+
+```{r}
+#install.packages("dplyr")
+#install.packages("stringr")
+
+# Load required libraries
+library(tidytext)
+library(dplyr)
+library(stringr)
+library(tidyr)
+
+
+#not sure why this is not loading
+
+
+# Create bigrams from your articles
+bigrams <- moley_df %>%
+  unnest_tokens(bigram, sentence, token = "ngrams", n = 2) %>%
+  # Remove bigrams containing stop words
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>%
+  # Remove numbers and special characters
+  filter(!str_detect(word1, "\\d")) %>%
+  filter(!str_detect(word2, "\\d")) %>%
+  # Recombine the words
+  unite(bigram, word1, word2, sep = " ") %>%
+  # Count frequencies
+  count(bigram, sort = TRUE) %>%
+  # Get top 20
+  slice_head(n = 20)
+
+# View the top 20 bigrams
+print(bigrams)
+```
+
+#Working directory
+```{r}
+getwd()
+setwd("/Users/teona/Desktop/text analysis/assignment3")
+
+```
+
+
+#Biagrams
+```{r}
+install.packages("quanteda")
+install.packages("rio")
+install.packages("knitr")
+install.packages("reader")
+```
+
+
+```{r message=FALSE, warning=FALSE}
+#load tidyverse, tidytext, rio and quanteda libraries
+library(tidyverse)
+library(rio)
+library(tidytext)
+library(quanteda)
+library(knitr)
+library(reader)
+```
+
+#Import dataframe 
+```{r}
+
+moley <- read_csv("'/Users/teona/Desktop/text analysis/assignment3/moley.csv")
+
+```
+```{r}
+library(readr)
+
+moley <- read_csv("/Users/teona/Desktop/text analysis/assignment3/moley.csv")
+
+setwd("/Users/teona/Desktop/text analysis/assignment3")
+moley <- read_csv("moley.csv")
+
+
+```
+
+
+```{r}
+
+# 1. First, check your working directory
+getwd()
+
+# 2. Set working directory if needed
+setwd("/Users/teona/Desktop/text analysis/assignment3")
+
+# 3. Load required libraries
+library(tidyverse)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+
+# 4. Create articles_df from the extracted text files
+moley_df <- tibble(
+  filepath = list.files("extracted", 
+                       pattern = "*.txt", 
+                       full.names = TRUE)
+) %>%
+  # Read the content of each file
+  mutate(
+    sentence = map_chr(filepath, ~read_file(.)),
+    # Get just the filename
+    filename = basename(filepath)
+  )
+
+# 5. Verify the data loaded properly
+glimpse(articles_df)
+
+```
+
+
+#I managed to run this several times, but suddenly stopped working
+```{r}
+# Clean and analyze the text data
+bigrams_df <- articles_df %>%
+  # Clean the text
+  mutate(sentence = tolower(sentence)) %>%
+  mutate(sentence = str_replace_all(sentence, "[^[:alpha:]\\s]", "")) %>%
+  mutate(sentence = str_squish(sentence)) %>%
+  
+  # Create bigrams
+  unnest_tokens(bigram, sentence, token = "ngrams", n = 2) %>%
+  
+  # Separate bigrams into individual words
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  
+  # Remove stop words from both words
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>%
+  
+  # Remove any empty strings
+  filter(word1 != "", word2 != "") %>%
+  
+  # Recombine into bigrams
+  unite(bigram, word1, word2, sep = " ") %>%
+  
+  # Count frequencies
+  count(bigram, sort = TRUE) %>%
+  
+  # Get top 20 bigrams
+  slice_head(n = 20)
+
+# Create the visualization
+ggplot(bigrams_df, aes(x = reorder(bigram, n), y = n)) +
+  # Create horizontal bars
+  geom_col(fill = "steelblue", alpha = 0.8) +
+  # Flip coordinates to make it horizontal
+  coord_flip() +
+  # Add labels and title
+  labs(
+    title = "Top 20 Most Frequent Bigrams",
+    subtitle = "By Teona Goderdzishvili",
+    x = "Bigram",
+    y = "Frequency",
+    caption = "Source: News Articles Analysis"
+  ) +
+  # Customize theme
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 10),
+    plot.caption = element_text(size = 8, color = "gray50"),
+    panel.grid.minor = element_blank()
+  )
+
+# Print the top 20 bigrams as a table
+print("Top 20 Bigrams and their frequencies:")
+print(bigrams_df, n = 20)
+
+```
+
+
+#essay
+I created a file called "assignment3" for this assignment and placed the PDF document there. I attempted several times to set up the file directory and that is why in some codes I used shorter code (taking in mind the last week home assignment comments). Unfortunately, shortened version did not load. 
+
+I've got 17 articles in the file and extracted them. Using R’s pdftools and tidyverse packages, I extracted the raw text and saved it as a standalone text file. By the “End of Document” I split the file into individual articles for clearer analysis, and I've got 33 such documents. 
+
+Then I implemented tokenization to break down articles into individual words, to analyze the text frequencies. For example, "gold standard" was mentioned the most 54 times, the second most-mentioned was "white house" (46 times). Before doing this I removed the stop words "and" and "the". 
+
+By the end, I created the chart and visualized the above-mentioned and 18 more frequently-mentioned phrases.
